@@ -47,38 +47,38 @@ app.post("/identify", async (req, res) => {
             });
         }
 
-        // 2. Get all related contacts (via matched IDs)
-        const matchedIds = matched.map(c => c.id);
+	// 2. Get all parents of matched contacts
+	const matchedIds = matched.map(c => c.linkedId ?? c.id);
 
-        let related = await prisma.contact.findMany({
-            where: {
-                OR: [
-                    { id: { in: matchedIds } },
-                    { linkedId: { in: matchedIds } }
-                ]
-            }
+        let parents = await prisma.contact.findMany({
+            where: { id: { in: matchedIds } }
         });
 
         // 3. Find the oldest contact → PRIMARY
-        let primary = related.reduce((oldest, curr) => {
+        let primary = parents.reduce((oldest, curr) => {
             return new Date(curr.createdAt) < new Date(oldest.createdAt)
                 ? curr
                 : oldest;
         });
 
         // 4. Convert other primaries → secondary
-        for (let contact of related) {
-            if (contact.id !== primary.id && contact.linkPrecedence === "primary") {
-                await prisma.contact.update({
-                    where: { id: contact.id },
-                    data: {
-                        linkPrecedence: "secondary",
-                        linkedId: primary.id,
-                        updatedAt: new Date()
-                    }
-                });
-            }
-        }
+        const idsToUpdate = parents
+    		.filter(c => c.id !== primary.id)
+    		.map(c => c.id);
+
+	await prisma.contact.updateMany({
+    		where: {
+        		OR: [
+            		{ id: { in: idsToUpdate } },
+            		{ linkedId: { in: idsToUpdate } }
+        		]
+    		},
+    		data: {
+        		linkedId: primary.id,
+        		linkPrecedence: "secondary",
+        		updatedAt: new Date()
+    		}
+		});
 
         // 5. Get updated full chain using primary
         let finalContacts = await prisma.contact.findMany({
